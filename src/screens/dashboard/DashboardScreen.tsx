@@ -6,6 +6,7 @@ import { ActivityIndicator, Badge, Card, Text } from 'react-native-paper';
 import { CartesianChart, Bar, Line, useChartPressState } from 'victory-native';
 import { Circle } from '@shopify/react-native-skia';
 
+import { isAxiosError } from 'axios';
 import { useDashboard } from '../../hooks/useDashboard';
 import { useAuthStore } from '../../store/authStore';
 import { theme } from '../../theme';
@@ -78,7 +79,7 @@ function MetaCard({ meta, realizado, percentual }: { meta: number; realizado: nu
 
 export default function DashboardScreen() {
   const user = useAuthStore((s) => s.user);
-  const { data, isLoading, isError, refetch, isFetching } = useDashboard();
+  const { data, isLoading, isError, error, refetch, isFetching, fetchStatus } = useDashboard();
   const { state: _pressState } = useChartPressState({ x: 0, y: { valor: 0 } });
 
   const onRefresh = useCallback(() => {
@@ -96,13 +97,48 @@ export default function DashboardScreen() {
     );
   }
 
-  if (isError || !data) {
+  // Query desabilitada: user.code está vazio (JWT sem claim sub/userId)
+  if (fetchStatus === 'idle' && !data) {
     return (
       <View style={styles.center}>
         <Text variant="bodyLarge" style={styles.errorText}>
-          Não foi possível carregar os dados.
+          Código do vendedor não identificado.
         </Text>
-        <Text variant="bodySmall" style={styles.kpiLabel} onPress={() => refetch()}>
+        <Text variant="bodySmall" style={styles.kpiLabel}>
+          Usuário logado: {user?.name ?? '—'} | Código: "{user?.code ?? ''}"
+        </Text>
+        <Text variant="bodySmall" style={[styles.kpiLabel, { marginTop: 8 }]}>
+          Verifique os claims do JWT retornados pelo Protheus.
+        </Text>
+      </View>
+    );
+  }
+
+  if (isError || !data) {
+    let errorMsg = 'Não foi possível carregar os dados.';
+    let errorDetail = '';
+    if (isAxiosError(error)) {
+      const status = error.response?.status;
+      errorDetail = status
+        ? `HTTP ${status} — ${error.response?.statusText ?? ''}`
+        : `Rede: ${error.code ?? error.message}`;
+    } else if (error instanceof Error) {
+      errorDetail = error.message;
+    }
+    return (
+      <View style={styles.center}>
+        <Text variant="bodyLarge" style={styles.errorText}>
+          {errorMsg}
+        </Text>
+        {!!errorDetail && (
+          <Text variant="bodySmall" style={[styles.kpiLabel, { marginTop: 4 }]}>
+            {errorDetail}
+          </Text>
+        )}
+        <Text variant="bodySmall" style={[styles.kpiLabel, { marginTop: 4 }]}>
+          Endpoint: /vendedores/{user?.code ?? '?'}/dashboard
+        </Text>
+        <Text variant="bodySmall" style={[styles.kpiLabel, styles.retryLink]} onPress={() => refetch()}>
           Toque para tentar novamente
         </Text>
       </View>
@@ -393,5 +429,10 @@ const styles = StyleSheet.create({
   statusBadge: {
     color: '#fff',
     fontSize: 10,
+  },
+  retryLink: {
+    color: theme.colors.primary,
+    marginTop: 12,
+    textDecorationLine: 'underline',
   },
 });
