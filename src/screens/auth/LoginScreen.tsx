@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { isAxiosError } from 'axios';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
@@ -34,8 +35,18 @@ export default function LoginScreen() {
     try {
       setApiError('');
       await login(data.username, data.password);
-    } catch {
-      setApiError('Usuário ou senha inválidos. Verifique suas credenciais.');
+    } catch (error) {
+      if (isAxiosError(error)) {
+        if (error.response?.status === 401 || error.response?.status === 400) {
+          setApiError('Usuário ou senha inválidos. Verifique suas credenciais.');
+        } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || !error.response) {
+          setApiError('Não foi possível conectar ao servidor. Verifique sua conexão e a URL da API.');
+        } else {
+          setApiError(`Erro no servidor (${error.response.status}). Tente novamente.`);
+        }
+      } else {
+        setApiError('Erro inesperado. Tente novamente.');
+      }
       setSnackVisible(true);
     }
   };
