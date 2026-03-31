@@ -4,6 +4,11 @@ import * as SecureStore from 'expo-secure-store';
 export const TOKEN_KEY = 'auth_token';
 export const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 
+let _logoutCallback: (() => void) | null = null;
+export function setLogoutCallback(cb: () => void) {
+  _logoutCallback = cb;
+}
+
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
@@ -56,6 +61,7 @@ apiClient.interceptors.response.use(
       } catch {
         await SecureStore.deleteItemAsync(TOKEN_KEY);
         await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+        _logoutCallback?.();
         return Promise.reject(error);
       }
     }
