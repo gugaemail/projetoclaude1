@@ -4,6 +4,8 @@ import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider } from 'react-native-paper';
 
+// Initialize Firebase before any other import that may use it
+import './src/config/firebase';
 import RootNavigator from './src/navigation/RootNavigator';
 import { theme } from './src/theme';
 

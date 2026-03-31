@@ -1,137 +1,152 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { isAxiosError } from 'axios';
-import { useState } from 'react';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+import { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
-import { Button, HelperText, Snackbar, Text, TextInput } from 'react-native-paper';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Button, Divider, HelperText, Snackbar, Text, TextInput } from 'react-native-paper';
 import { z } from 'zod';
 
 import { useAuthStore } from '../../store/authStore';
 import { theme } from '../../theme';
 
+WebBrowser.maybeCompleteAuthSession();
+
+// --- Zod schemas ---
 const loginSchema = z.object({
-  username: z.string().min(1, 'Usuário obrigatório'),
+  email: z.string().email('E-mail inválido'),
   password: z.string().min(1, 'Senha obrigatória'),
 });
 
-type LoginFormData = z.infer<typeof loginSchema>;
+const registerSchema = z.object({
+  email: z.string().email('E-mail inválido'),
+  password: z.string().min(6, 'Mínimo 6 caracteres'),
+  confirmPassword: z.string().min(1, 'Confirme a senha'),
+}).refine((d) => d.password === d.confirmPassword, {
+  message: 'As senhas não coincidem',
+  path: ['confirmPassword'],
+});
 
-export default function LoginScreen() {
-  const { login, isLoading } = useAuthStore();
-  const [apiError, setApiError] = useState('');
+type LoginFormData = z.infer<typeof loginSchema>;
+type RegisterFormData = z.infer<typeof registerSchema>;
+
+// --- Firebase error codes → PT-BR ---
+function firebaseErrorMessage(code: string): string {
+  const map: Record<string, string> = {
+    'auth/user-not-found': 'Usuário não encontrado.',
+    'auth/wrong-password': 'Senha incorreta.',
+    'auth/email-already-in-use': 'E-mail já está em uso.',
+    'auth/weak-password': 'Senha muito fraca. Use ao menos 6 caracteres.',
+    'auth/invalid-email': 'E-mail inválido.',
+    'auth/invalid-credential': 'Credenciais inválidas. Verifique e-mail e senha.',
+    'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos.',
+    'auth/network-request-failed': 'Sem conexão. Verifique sua internet.',
+  };
+  return map[code] ?? 'Erro ao autenticar. Tente novamente.';
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const firebaseCode = (error as { code?: string }).code;
+    if (firebaseCode) return firebaseErrorMessage(firebaseCode);
+    if (isAxiosError(error)) {
+      if (!error.response) return 'Sem conexão com o servidor.';
+      return `Erro ${error.response.status}. Tente novamente.`;
+    }
+    return error.message;
+  }
+  return 'Erro inesperado. Tente novamente.';
+}
+
+// --- LoginTab ---
+function LoginTab() {
+  const { loginWithEmail } = useAuthStore();
+  const [errorMsg, setErrorMsg] = useState('');
   const [snackVisible, setSnackVisible] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
-  const {
-    control,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<LoginFormData>({
+  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { username: '', password: '' },
+    defaultValues: { email: '', password: '' },
   });
 
   const onSubmit = async (data: LoginFormData) => {
     try {
-      setApiError('');
-      await login(data.username, data.password);
-    } catch (error) {
-      if (isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          setApiError('Usuário ou senha inválidos. Verifique suas credenciais.');
-        } else if (error.response?.status === 400) {
-          setApiError('Requisição inválida (400). Verifique empresa/filial no .env.');
-        } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || !error.response) {
-          setApiError('Não foi possível conectar ao servidor. Verifique sua conexão e a URL da API.');
-        } else {
-          setApiError(`Erro no servidor (${error.response.status}). Tente novamente.`);
-        }
-      } else {
-        setApiError('Erro inesperado. Tente novamente.');
-      }
+      setErrorMsg('');
+      await loginWithEmail(data.email, data.password);
+    } catch (err) {
+      setErrorMsg(getErrorMessage(err));
       setSnackVisible(true);
     }
   };
 
-  const loading = isSubmitting || isLoading;
-
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.inner}>
-        <Text variant="headlineMedium" style={styles.title}>
-          ProtheusApp
-        </Text>
-        <Text variant="bodyMedium" style={styles.subtitle}>
-          Acesse sua conta para continuar
-        </Text>
+    <>
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.fieldWrapper}>
+            <TextInput
+              label="E-mail"
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              left={<TextInput.Icon icon="email" />}
+              error={!!errors.email}
+              disabled={isSubmitting}
+              style={styles.input}
+            />
+            <HelperText type="error" visible={!!errors.email}>
+              {errors.email?.message}
+            </HelperText>
+          </View>
+        )}
+      />
 
-        <Controller
-          control={control}
-          name="username"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <View style={styles.fieldWrapper}>
-              <TextInput
-                label="Usuário"
-                value={value}
-                onChangeText={onChange}
-                onBlur={onBlur}
-                autoCapitalize="none"
-                autoCorrect={false}
-                left={<TextInput.Icon icon="account" />}
-                error={!!errors.username}
-                disabled={loading}
-                style={styles.input}
-              />
-              <HelperText type="error" visible={!!errors.username}>
-                {errors.username?.message}
-              </HelperText>
-            </View>
-          )}
-        />
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.fieldWrapper}>
+            <TextInput
+              label="Senha"
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              secureTextEntry={!passwordVisible}
+              left={<TextInput.Icon icon="lock" />}
+              right={
+                <TextInput.Icon
+                  icon={passwordVisible ? 'eye-off' : 'eye'}
+                  onPress={() => setPasswordVisible((v) => !v)}
+                />
+              }
+              error={!!errors.password}
+              disabled={isSubmitting}
+              style={styles.input}
+            />
+            <HelperText type="error" visible={!!errors.password}>
+              {errors.password?.message}
+            </HelperText>
+          </View>
+        )}
+      />
 
-        <Controller
-          control={control}
-          name="password"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <View style={styles.fieldWrapper}>
-              <TextInput
-                label="Senha"
-                value={value}
-                onChangeText={onChange}
-                onBlur={onBlur}
-                secureTextEntry={!passwordVisible}
-                left={<TextInput.Icon icon="lock" />}
-                right={
-                  <TextInput.Icon
-                    icon={passwordVisible ? 'eye-off' : 'eye'}
-                    onPress={() => setPasswordVisible((v) => !v)}
-                  />
-                }
-                error={!!errors.password}
-                disabled={loading}
-                style={styles.input}
-              />
-              <HelperText type="error" visible={!!errors.password}>
-                {errors.password?.message}
-              </HelperText>
-            </View>
-          )}
-        />
-
-        <Button
-          mode="contained"
-          onPress={handleSubmit(onSubmit)}
-          loading={loading}
-          disabled={loading}
-          style={styles.button}
-          contentStyle={styles.buttonContent}
-        >
-          Entrar
-        </Button>
-      </View>
+      <Button
+        mode="contained"
+        onPress={handleSubmit(onSubmit)}
+        loading={isSubmitting}
+        disabled={isSubmitting}
+        style={styles.button}
+        contentStyle={styles.buttonContent}
+      >
+        Entrar
+      </Button>
 
       <Snackbar
         visible={snackVisible}
@@ -139,7 +154,263 @@ export default function LoginScreen() {
         duration={4000}
         action={{ label: 'OK', onPress: () => setSnackVisible(false) }}
       >
-        {apiError}
+        {errorMsg}
+      </Snackbar>
+    </>
+  );
+}
+
+// --- RegisterTab ---
+function RegisterTab() {
+  const { registerWithEmail } = useAuthStore();
+  const [errorMsg, setErrorMsg] = useState('');
+  const [snackVisible, setSnackVisible] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+
+  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<RegisterFormData>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { email: '', password: '', confirmPassword: '' },
+  });
+
+  const onSubmit = async (data: RegisterFormData) => {
+    try {
+      setErrorMsg('');
+      await registerWithEmail(data.email, data.password);
+    } catch (err) {
+      setErrorMsg(getErrorMessage(err));
+      setSnackVisible(true);
+    }
+  };
+
+  return (
+    <>
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.fieldWrapper}>
+            <TextInput
+              label="E-mail"
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              left={<TextInput.Icon icon="email" />}
+              error={!!errors.email}
+              disabled={isSubmitting}
+              style={styles.input}
+            />
+            <HelperText type="error" visible={!!errors.email}>
+              {errors.email?.message}
+            </HelperText>
+          </View>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.fieldWrapper}>
+            <TextInput
+              label="Senha"
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              secureTextEntry={!passwordVisible}
+              left={<TextInput.Icon icon="lock" />}
+              right={
+                <TextInput.Icon
+                  icon={passwordVisible ? 'eye-off' : 'eye'}
+                  onPress={() => setPasswordVisible((v) => !v)}
+                />
+              }
+              error={!!errors.password}
+              disabled={isSubmitting}
+              style={styles.input}
+            />
+            <HelperText type="error" visible={!!errors.password}>
+              {errors.password?.message}
+            </HelperText>
+          </View>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="confirmPassword"
+        render={({ field: { onChange, onBlur, value } }) => (
+          <View style={styles.fieldWrapper}>
+            <TextInput
+              label="Confirme a senha"
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              secureTextEntry={!confirmVisible}
+              left={<TextInput.Icon icon="lock-check" />}
+              right={
+                <TextInput.Icon
+                  icon={confirmVisible ? 'eye-off' : 'eye'}
+                  onPress={() => setConfirmVisible((v) => !v)}
+                />
+              }
+              error={!!errors.confirmPassword}
+              disabled={isSubmitting}
+              style={styles.input}
+            />
+            <HelperText type="error" visible={!!errors.confirmPassword}>
+              {errors.confirmPassword?.message}
+            </HelperText>
+          </View>
+        )}
+      />
+
+      <Button
+        mode="contained"
+        onPress={handleSubmit(onSubmit)}
+        loading={isSubmitting}
+        disabled={isSubmitting}
+        style={styles.button}
+        contentStyle={styles.buttonContent}
+      >
+        Cadastrar
+      </Button>
+
+      <Snackbar
+        visible={snackVisible}
+        onDismiss={() => setSnackVisible(false)}
+        duration={4000}
+        action={{ label: 'OK', onPress: () => setSnackVisible(false) }}
+      >
+        {errorMsg}
+      </Snackbar>
+    </>
+  );
+}
+
+// --- Main Screen ---
+export default function LoginScreen() {
+  const [activeTab, setActiveTab] = useState<'cadastrar' | 'entrar'>('cadastrar');
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState('');
+  const [googleSnack, setGoogleSnack] = useState(false);
+  const { loginWithGoogleCredential } = useAuthStore();
+
+  const [, response, promptAsync] = Google.useIdTokenAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  });
+
+  const handledRef = useRef(false);
+
+  useEffect(() => {
+    if (response?.type === 'success' && !handledRef.current) {
+      handledRef.current = true;
+      const { id_token } = response.params;
+      setGoogleLoading(true);
+      loginWithGoogleCredential(id_token)
+        .catch((err: unknown) => {
+          setGoogleError(getErrorMessage(err));
+          setGoogleSnack(true);
+        })
+        .finally(() => {
+          setGoogleLoading(false);
+          handledRef.current = false;
+        });
+    }
+  }, [response, loginWithGoogleCredential]);
+
+  const handleGooglePress = async () => {
+    handledRef.current = false;
+    await promptAsync();
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Logo / Header */}
+        <View style={styles.logoArea}>
+          <Text variant="headlineLarge" style={styles.logoText}>
+            Addere
+          </Text>
+          <Text variant="bodyMedium" style={styles.logoSubtitle}>
+            Sistema de Gestão Comercial
+          </Text>
+        </View>
+
+        {/* Tab Bar */}
+        <View style={styles.tabBar}>
+          <Button
+            mode={activeTab === 'cadastrar' ? 'contained' : 'text'}
+            onPress={() => setActiveTab('cadastrar')}
+            style={styles.tabButton}
+            labelStyle={styles.tabLabel}
+          >
+            Cadastrar
+          </Button>
+          <Button
+            mode={activeTab === 'entrar' ? 'contained' : 'text'}
+            onPress={() => setActiveTab('entrar')}
+            style={styles.tabButton}
+            labelStyle={styles.tabLabel}
+          >
+            Entrar
+          </Button>
+        </View>
+
+        {/* Tab Content */}
+        <View style={styles.formArea}>
+          <Text variant="headlineSmall" style={styles.formTitle}>
+            {activeTab === 'cadastrar' ? 'Criar Conta' : 'Acessar Conta'}
+          </Text>
+          <Text variant="bodyMedium" style={styles.formSubtitle}>
+            {activeTab === 'cadastrar'
+              ? 'Para começar, preencha os campos abaixo.'
+              : 'Entre com suas credenciais.'}
+          </Text>
+
+          {activeTab === 'cadastrar' ? <RegisterTab /> : <LoginTab />}
+
+          {/* Divider */}
+          <View style={styles.dividerRow}>
+            <Divider style={styles.dividerLine} />
+            <Text variant="bodySmall" style={styles.dividerText}>
+              ou entre com
+            </Text>
+            <Divider style={styles.dividerLine} />
+          </View>
+
+          {/* Google Button */}
+          <Button
+            mode="outlined"
+            icon="google"
+            onPress={handleGooglePress}
+            loading={googleLoading}
+            disabled={googleLoading}
+            style={styles.googleButton}
+            contentStyle={styles.buttonContent}
+          >
+            Continue with Google
+          </Button>
+        </View>
+      </ScrollView>
+
+      <Snackbar
+        visible={googleSnack}
+        onDismiss={() => setGoogleSnack(false)}
+        duration={4000}
+        action={{ label: 'OK', onPress: () => setGoogleSnack(false) }}
+      >
+        {googleError}
       </Snackbar>
     </KeyboardAvoidingView>
   );
@@ -150,23 +421,51 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  inner: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+  scroll: {
+    flexGrow: 1,
     paddingBottom: 32,
   },
-  title: {
-    color: theme.colors.primary,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8,
+  logoArea: {
+    alignItems: 'center',
+    paddingTop: 64,
+    paddingBottom: 32,
+    backgroundColor: theme.colors.primaryContainer,
   },
-  subtitle: {
+  logoText: {
+    color: theme.colors.onPrimaryContainer,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  logoSubtitle: {
+    color: theme.colors.onPrimaryContainer,
+    opacity: 0.75,
+    marginTop: 4,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    gap: 8,
+  },
+  tabButton: {
+    flex: 1,
+    borderRadius: 8,
+  },
+  tabLabel: {
+    fontSize: 14,
+  },
+  formArea: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+  },
+  formTitle: {
     color: theme.colors.onBackground,
-    textAlign: 'center',
-    marginBottom: 32,
-    opacity: 0.7,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  formSubtitle: {
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 20,
   },
   fieldWrapper: {
     marginBottom: 4,
@@ -175,10 +474,26 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   button: {
-    marginTop: 16,
+    marginTop: 8,
     borderRadius: 8,
   },
   buttonContent: {
     paddingVertical: 6,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+    gap: 8,
+  },
+  dividerLine: {
+    flex: 1,
+  },
+  dividerText: {
+    color: theme.colors.onSurfaceVariant,
+  },
+  googleButton: {
+    borderRadius: 8,
+    borderColor: theme.colors.outline,
   },
 });

@@ -5,10 +5,10 @@ import { setLogoutCallback } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { theme } from '../theme';
 import AppDrawer from './AppDrawer';
-import AuthStack from './AuthStack';
+import { AuthLoginStack, ProtheusSetupStack } from './AuthStack';
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading, initialize, logout } = useAuthStore();
+  const { isAuthenticated, isLoading, firebaseUid, initialize, logout } = useAuthStore();
 
   useEffect(() => {
     setLogoutCallback(() => {
@@ -25,7 +25,9 @@ export default function RootNavigator() {
     );
   }
 
-  return isAuthenticated ? <AppDrawer /> : <AuthStack />;
+  if (isAuthenticated) return <AppDrawer />;
+  if (firebaseUid) return <ProtheusSetupStack />;
+  return <AuthLoginStack />;
 }
 
 const styles = StyleSheet.create({
