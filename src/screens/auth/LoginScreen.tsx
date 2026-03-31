@@ -37,8 +37,10 @@ export default function LoginScreen() {
       await login(data.username, data.password);
     } catch (error) {
       if (isAxiosError(error)) {
-        if (error.response?.status === 401 || error.response?.status === 400) {
+        if (error.response?.status === 401) {
           setApiError('Usuário ou senha inválidos. Verifique suas credenciais.');
+        } else if (error.response?.status === 400) {
+          setApiError('Requisição inválida (400). Verifique empresa/filial no .env.');
         } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || !error.response) {
           setApiError('Não foi possível conectar ao servidor. Verifique sua conexão e a URL da API.');
         } else {

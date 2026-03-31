@@ -28,12 +28,17 @@ export function parseUserFromToken(token: string): AuthUser {
 }
 
 export async function login(username: string, password: string): Promise<TokenResponse> {
-  const { data } = await apiClient.post<TokenResponse>('/api/oauth2/v1/token', {
+  // OAuth2 password grant exige application/x-www-form-urlencoded (RFC 6749)
+  const body = new URLSearchParams({
     grant_type: 'password',
     username,
     password,
     company: process.env.EXPO_PUBLIC_COMPANY ?? '01',
     branch: process.env.EXPO_PUBLIC_BRANCH ?? '01',
   } satisfies LoginRequest);
+
+  const { data } = await apiClient.post<TokenResponse>('/api/oauth2/v1/token', body.toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
   return data;
 }
