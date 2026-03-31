@@ -1,4 +1,4 @@
-import type { AuthUser, LoginRequest, TokenResponse, UserRole } from '../../types/auth';
+import type { AuthUser, TokenResponse, UserRole } from '../../types/auth';
 import apiClient from '../client';
 
 // Decode JWT payload without a library (base64url decode)
@@ -28,17 +28,19 @@ export function parseUserFromToken(token: string): AuthUser {
 }
 
 export async function login(username: string, password: string): Promise<TokenResponse> {
-  // OAuth2 password grant exige application/x-www-form-urlencoded (RFC 6749)
-  const body = new URLSearchParams({
-    grant_type: 'password',
-    username,
-    password,
-    company: process.env.EXPO_PUBLIC_COMPANY ?? '01',
-    branch: process.env.EXPO_PUBLIC_BRANCH ?? '01',
-  } satisfies LoginRequest);
-
-  const { data } = await apiClient.post<TokenResponse>('/api/oauth2/v1/token', body.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
+  // Protheus: grant_type via query param, username/password via headers (não no body)
+  const { data } = await apiClient.post<TokenResponse>(
+    '/api/oauth2/v1/token',
+    null, // sem body
+    {
+      params: { grant_type: 'password' },
+      headers: {
+        username,
+        password,
+        company: process.env.EXPO_PUBLIC_COMPANY ?? '01',
+        branch: process.env.EXPO_PUBLIC_BRANCH ?? '01',
+      },
+    },
+  );
   return data;
 }

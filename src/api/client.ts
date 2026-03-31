@@ -43,9 +43,11 @@ apiClient.interceptors.response.use(
         const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
         if (!refreshToken) throw new Error('No refresh token');
 
+        // Protheus: grant_type e refresh_token como query params, sem body
         const { data } = await axios.post(
           `${process.env.EXPO_PUBLIC_API_URL}/api/oauth2/v1/token`,
-          { grant_type: 'refresh_token', refresh_token: refreshToken },
+          null,
+          { params: { grant_type: 'refresh_token', refresh_token: refreshToken } },
         );
 
         await SecureStore.setItemAsync(TOKEN_KEY, data.access_token);
