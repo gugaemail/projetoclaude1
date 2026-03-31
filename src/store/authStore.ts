@@ -7,7 +7,6 @@ import {
   type User as FirebaseUser,
 } from 'firebase/auth';
 import * as SecureStore from 'expo-secure-store';
-import { createMMKV } from 'react-native-mmkv';
 import { create } from 'zustand';
 
 import { login as apiLogin } from '../api/endpoints/auth';
@@ -15,9 +14,8 @@ import { TOKEN_KEY, REFRESH_TOKEN_KEY } from '../api/client';
 import { firebaseAuth } from '../config/firebase';
 import type { AuthUser, UserRole } from '../types/auth';
 
-// Storage keys
+// All stored in SecureStore (works with Expo Go, no native build needed)
 const PROTHEUS_PASSWORD_KEY = 'protheus_password';
-const storage = createMMKV({ id: 'auth' });
 const FIREBASE_UID_KEY = 'firebase_uid';
 const FIREBASE_EMAIL_KEY = 'firebase_email';
 const FIREBASE_NAME_KEY = 'firebase_name';
@@ -45,20 +43,22 @@ interface AuthActions {
 
 type AuthStore = AuthState & AuthActions;
 
-function buildUser(firebaseUser: FirebaseUser | null, vendorCode: string, role: UserRole = 'vendedor'): AuthUser {
+async function buildUser(firebaseUser: FirebaseUser | null, vendorCode: string, role: UserRole = 'vendedor'): Promise<AuthUser> {
+  const savedName = await SecureStore.getItemAsync(FIREBASE_NAME_KEY);
+  const savedEmail = await SecureStore.getItemAsync(FIREBASE_EMAIL_KEY);
   return {
     code: vendorCode,
-    name: firebaseUser?.displayName ?? storage.getString(FIREBASE_NAME_KEY) ?? 'Usuário',
+    name: firebaseUser?.displayName ?? savedName ?? 'Usuário',
     role,
-    email: firebaseUser?.email ?? storage.getString(FIREBASE_EMAIL_KEY) ?? undefined,
+    email: firebaseUser?.email ?? savedEmail ?? undefined,
   };
 }
 
 async function tryProtheusAutoLogin(
   firebaseUser: FirebaseUser | null,
 ): Promise<Partial<AuthState>> {
-  const username = storage.getString(PROTHEUS_USERNAME_KEY);
-  const vendorCode = storage.getString(PROTHEUS_VENDOR_CODE_KEY);
+  const username = await SecureStore.getItemAsync(PROTHEUS_USERNAME_KEY);
+  const vendorCode = await SecureStore.getItemAsync(PROTHEUS_VENDOR_CODE_KEY);
   const password = await SecureStore.getItemAsync(PROTHEUS_PASSWORD_KEY);
 
   if (!username || !vendorCode || !password) {
@@ -69,7 +69,7 @@ async function tryProtheusAutoLogin(
     const tokenResponse = await apiLogin(username, password);
     await SecureStore.setItemAsync(TOKEN_KEY, tokenResponse.access_token);
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokenResponse.refresh_token);
-    const user = buildUser(firebaseUser, vendorCode);
+    const user = await buildUser(firebaseUser, vendorCode);
     return {
       user,
       token: tokenResponse.access_token,
@@ -91,12 +91,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isLoading: true,
 
   initialize: async () => {
-    const savedUid = storage.getString(FIREBASE_UID_KEY);
+    const savedUid = await SecureStore.getItemAsync(FIREBASE_UID_KEY);
     if (!savedUid) {
       set({ isLoading: false });
       return;
     }
-    // Firebase user session known from MMKV — try Protheus auto-login
     const protheusState = await tryProtheusAutoLogin(null);
     set({ firebaseUid: savedUid, ...protheusState, isLoading: false });
   },
@@ -104,9 +103,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
   loginWithEmail: async (email: string, password: string) => {
     const result = await signInWithEmailAndPassword(firebaseAuth, email, password);
     const { uid, displayName } = result.user;
-    storage.set(FIREBASE_UID_KEY, uid);
-    if (email) storage.set(FIREBASE_EMAIL_KEY, email);
-    if (displayName) storage.set(FIREBASE_NAME_KEY, displayName);
+    await SecureStore.setItemAsync(FIREBASE_UID_KEY, uid);
+    if (email) await SecureStore.setItemAsync(FIREBASE_EMAIL_KEY, email);
+    if (displayName) await SecureStore.setItemAsync(FIREBASE_NAME_KEY, displayName);
 
     const protheusState = await tryProtheusAutoLogin(result.user);
     set({ firebaseUid: uid, ...protheusState });
@@ -115,9 +114,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
   registerWithEmail: async (email: string, password: string) => {
     const result = await createUserWithEmailAndPassword(firebaseAuth, email, password);
     const { uid, displayName } = result.user;
-    storage.set(FIREBASE_UID_KEY, uid);
-    if (email) storage.set(FIREBASE_EMAIL_KEY, email);
-    if (displayName) storage.set(FIREBASE_NAME_KEY, displayName);
+    await SecureStore.setItemAsync(FIREBASE_UID_KEY, uid);
+    if (email) await SecureStore.setItemAsync(FIREBASE_EMAIL_KEY, email);
+    if (displayName) await SecureStore.setItemAsync(FIREBASE_NAME_KEY, displayName);
     set({ firebaseUid: uid });
   },
 
@@ -125,9 +124,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
     const credential = GoogleAuthProvider.credential(idToken);
     const result = await signInWithCredential(firebaseAuth, credential);
     const { uid, email, displayName } = result.user;
-    storage.set(FIREBASE_UID_KEY, uid);
-    if (email) storage.set(FIREBASE_EMAIL_KEY, email);
-    if (displayName) storage.set(FIREBASE_NAME_KEY, displayName);
+    await SecureStore.setItemAsync(FIREBASE_UID_KEY, uid);
+    if (email) await SecureStore.setItemAsync(FIREBASE_EMAIL_KEY, email);
+    if (displayName) await SecureStore.setItemAsync(FIREBASE_NAME_KEY, displayName);
 
     const protheusState = await tryProtheusAutoLogin(result.user);
     set({ firebaseUid: uid, ...protheusState });
@@ -138,11 +137,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
     await SecureStore.setItemAsync(TOKEN_KEY, tokenResponse.access_token);
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokenResponse.refresh_token);
     await SecureStore.setItemAsync(PROTHEUS_PASSWORD_KEY, password);
-    storage.set(PROTHEUS_USERNAME_KEY, username);
-    storage.set(PROTHEUS_VENDOR_CODE_KEY, vendorCode);
+    await SecureStore.setItemAsync(PROTHEUS_USERNAME_KEY, username);
+    await SecureStore.setItemAsync(PROTHEUS_VENDOR_CODE_KEY, vendorCode);
 
-    const savedUid = storage.getString(FIREBASE_UID_KEY);
-    const user = buildUser(null, vendorCode);
+    const savedUid = await SecureStore.getItemAsync(FIREBASE_UID_KEY);
+    const user = await buildUser(null, vendorCode);
     set({
       user,
       token: tokenResponse.access_token,
@@ -156,11 +155,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     await SecureStore.deleteItemAsync(PROTHEUS_PASSWORD_KEY);
-    storage.remove(FIREBASE_UID_KEY);
-    storage.remove(FIREBASE_EMAIL_KEY);
-    storage.remove(FIREBASE_NAME_KEY);
-    storage.remove(PROTHEUS_USERNAME_KEY);
-    storage.remove(PROTHEUS_VENDOR_CODE_KEY);
+    await SecureStore.deleteItemAsync(FIREBASE_UID_KEY);
+    await SecureStore.deleteItemAsync(FIREBASE_EMAIL_KEY);
+    await SecureStore.deleteItemAsync(FIREBASE_NAME_KEY);
+    await SecureStore.deleteItemAsync(PROTHEUS_USERNAME_KEY);
+    await SecureStore.deleteItemAsync(PROTHEUS_VENDOR_CODE_KEY);
     try {
       await signOut(firebaseAuth);
     } catch {
