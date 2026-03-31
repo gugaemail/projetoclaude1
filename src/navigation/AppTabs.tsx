@@ -1,5 +1,5 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import ClientesScreen from '../screens/clientes/ClientesScreen';
 import DashboardScreen from '../screens/dashboard/DashboardScreen';
